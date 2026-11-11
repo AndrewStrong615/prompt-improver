@@ -1,0 +1,5 @@
+{
+  "name": "prompt-improver",
+  "owner": { "name": "andrewstrong615" },
+  "plugins": [{ "name": "prompt-improver", "source": "./" }]
+}
