@@ -7,6 +7,7 @@ declare module 'claude-code' {
       phase: Phase
       original: string | null
       note: string | null
+      result: string | null
     }
   }
 }

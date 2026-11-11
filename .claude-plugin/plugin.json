@@ -1,6 +1,6 @@
 {
   "name": "prompt-improver",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "An Improve-prompt button above the prompt box that rewrites your draft into a clear, specific, powerful prompt before you send it",
   "types": "./types/index.d.ts"
 }

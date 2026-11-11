@@ -7,6 +7,8 @@ const hasDraft = atom({ plugin: 'prompt-improver', key: 'hasDraft' } as const, f
 const phase = atom({ plugin: 'prompt-improver', key: 'phase' } as const, 'idle' as Phase)
 const original = atom({ plugin: 'prompt-improver', key: 'original' } as const, null as string | null)
 const note = atom({ plugin: 'prompt-improver', key: 'note' } as const, null as string | null)
+// Desktop only: the improved prompt, shown in the band (the app's prompt box is out of a mod's reach).
+const result = atom({ plugin: 'prompt-improver', key: 'result' } as const, null as string | null)
 
 // Used when there is no conversation to fork yet (before the first turn ends).
 const FALLBACK_MODEL = 'opus'
@@ -103,6 +105,27 @@ async function run($: EngineInterface): Promise<void> {
   }
 }
 
+// The desktop app's prompt box can't be read or filled by a mod, so the band takes the draft itself.
+async function runDesktop($: EngineInterface, draft: string): Promise<void> {
+  if ((await read($, phase)) === 'working') return
+  if (draft.trim().length === 0) {
+    $.ui.toast('Type a prompt first, then press Enter.')
+    return
+  }
+
+  await update($, phase, () => 'working')
+  await update($, note, () => null)
+  try {
+    const better = await improve($, draft.trim())
+    if (better === null) $.ui.toast('No improvement came back.')
+    await update($, result, () => better)
+  } catch (err) {
+    await update($, note, () => `Improve failed: ${err instanceof Error ? err.message : String(err)}`)
+  } finally {
+    await update($, phase, () => 'idle')
+  }
+}
+
 async function undo($: EngineInterface): Promise<void> {
   const was = await read($, original)
   if (was !== null) await $.prompt.fill({ text: was, mode: 'replace' })
@@ -156,42 +179,129 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
 
-    const state = await read($, phase)
-    const draft = await read($, hasDraft)
-    const message = await read($, note)
-    const canUndo = (await read($, original)) !== null
-    if (!draft && state === 'idle' && message === null) return next(e)
+    // Keep whatever another mod (complex-mode) draws here, under this mod's own row.
+    const mine = await (async () => {
+      const state = await read($, phase)
+      const message = await read($, note)
 
-    const { Box, Button, Text } = $.ui.resolve(e)
+      if (e.surface === 'desktop') {
+        const { Box, Button, Input, Text } = $.ui.resolve(e)
+        const better = await read($, result)
+        const isActive = state === 'working' || better !== null
 
-    if (state === 'working') {
+        return (
+          <Box
+            borderStyle="round"
+            borderColor={isActive ? 'claude' : 'subtle'}
+            paddingX={1}
+            flexDirection="column"
+            gap={1}
+          >
+            <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={2}>
+              <Text weight="semibold">
+                ✨ {better !== null ? 'Improved prompt' : 'Prompt improver'}
+              </Text>
+              {state === 'working' && (
+                <Text size="footnote" color="claude">
+                  Improving…
+                </Text>
+              )}
+            </Box>
+
+            {state === 'working' ? (
+              <Text size="footnote" color="subtle">
+                Rewriting your draft into a clear, specific prompt.
+              </Text>
+            ) : better !== null ? (
+              <>
+                <Box borderStyle="round" borderColor="subtle" paddingX={1}>
+                  <Text>{better}</Text>
+                </Box>
+                <Box flexDirection="row" justifyContent="flex-end" gap={1}>
+                  <Button key="clear" label="Start over" onPress={() => update($, result, () => null)} />
+                  <Button
+                    key="copy"
+                    label="Copy"
+                    onPress={async () => {
+                      const copied = await $.ui.copy({ text: better, surface: e.surface })
+                      $.ui.toast(copied.isCopied ? 'Copied. Paste it into the prompt box.' : 'Could not copy; select the text instead.')
+                    }}
+                  />
+                  <Button
+                    key="send"
+                    variant="primary"
+                    label="Send it"
+                    onPress={async () => {
+                      await update($, result, () => null)
+                      $.prompt.submit({ text: better }).catch(() => $.ui.toast('Could not send; copy it instead.'))
+                    }}
+                  />
+                </Box>
+              </>
+            ) : (
+              <>
+                <Input
+                  key="draft"
+                  placeholder="Type a rough prompt, then press Enter to improve it"
+                  submitLabel="improve"
+                  rows={2}
+                  onSubmit={value => void runDesktop($, value)}
+                />
+                {message !== null && (
+                  <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1}>
+                    <Text size="footnote" color="error">
+                      {message}
+                    </Text>
+                    <Button key="dismiss" label="Dismiss" onPress={() => update($, note, () => null)} />
+                  </Box>
+                )}
+              </>
+            )}
+          </Box>
+        )
+      }
+
+      const draft = await read($, hasDraft)
+      const canUndo = (await read($, original)) !== null
+      if (!draft && state === 'idle' && message === null) return null
+
+      const { Box, Button, Text } = $.ui.resolve(e)
+
+      if (state === 'working') {
+        return (
+          <Box>
+            <Text color="claude">✨ Improving your prompt…</Text>
+          </Box>
+        )
+      }
+
       return (
-        <Box>
-          <Text dimColor>✨ Improving your prompt…</Text>
+        <Box flexDirection="row" gap={1}>
+          {draft && (
+            <Button
+              key="improve"
+              label={state === 'done' ? '✨ Improve again' : '✨ Improve prompt'}
+              hotkey="i"
+              onPress={() => run($)}
+            />
+          )}
+          {canUndo && <Button key="undo" label="↩ Undo" hotkey="u" onPress={() => undo($)} />}
+          {state === 'done' && <Text dimColor>Improved. Edit it or send it.</Text>}
+          {message !== null && <Text color="error">{message}</Text>}
+          {message !== null && (
+            <Button key="dismiss" label="Dismiss" onPress={() => update($, note, () => null)} />
+          )}
         </Box>
       )
-    }
+    })()
+    const below = await next(e)
+    if (mine === null) return below
+    const { Box } = $.ui.resolve(e)
 
     return (
-      <Box flexDirection="row" gap={1}>
-        {draft && (
-          <Button
-            key="improve"
-            label={state === 'done' ? '✨ Improve again' : '✨ Improve prompt'}
-            hotkey="i"
-            onPress={() => run($)}
-          />
-        )}
-        {canUndo && <Button key="undo" label="↩ Undo" hotkey="u" onPress={() => undo($)} />}
-        {state === 'done' && <Text dimColor>Improved. Edit it or send it.</Text>}
-        {message !== null && (
-          <Text color="red" dimColor>
-            {message}
-          </Text>
-        )}
-        {message !== null && (
-          <Button key="dismiss" label="Dismiss" onPress={() => update($, note, () => null)} />
-        )}
+      <Box flexDirection="column" gap={1}>
+        {below}
+        {mine}
       </Box>
     )
   })

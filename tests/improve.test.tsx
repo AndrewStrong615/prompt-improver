@@ -3,7 +3,15 @@ import { expect, test } from 'claude-code/testing'
 const BAND = {
   plugin: 'prompt-improver',
   component: 'AbovePrompt',
-  props: { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 10 },
+  props: {
+    hasSurvey: false,
+    isCollapsed: false,
+    isWorking: false,
+    maxRows: 10,
+    bodyColumns: 80,
+    scroll: { offset: 0, bodyRows: 9 },
+    view: {},
+  },
 } as const
 
 test('the button rewrites the draft and Undo puts it back', async ($, on) => {
@@ -17,7 +25,7 @@ test('the button rewrites the draft and Undo puts it back', async ($, on) => {
       value: {
         isAnswered: true,
         text: '<improved_prompt>Fix the crash in the parser and add a test.</improved_prompt>',
-        usage: { input_tokens: 1, output_tokens: 1 },
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
       },
     }
   })
@@ -34,5 +42,35 @@ test('the button rewrites the draft and Undo puts it back', async ($, on) => {
 
   await ui.press({ key: 'undo' })
   expect(fills.at(-1)).toBe('fix the bug in it')
+  await ui.unmount()
+})
+
+test('on desktop the band takes the draft itself, shows the rewrite and sends it', async ($, on) => {
+  const sent: string[] = []
+
+  on('model.fork', (_, e) => {
+    expect(e.prompt).toContain('<draft>\nfix the bug in it\n</draft>')
+    return {
+      value: {
+        isAnswered: true,
+        text: '<improved_prompt>Fix the crash in the parser and add a test.</improved_prompt>',
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      },
+    }
+  })
+  on('prompt.submit', (_, e) => {
+    sent.push(e.text)
+    return { drop: "captured by the test" }
+  })
+
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  expect(await ui.find({ key: 'draft' })).toBeDefined()
+
+  await ui.input({ key: 'draft', text: '  fix the bug in it ' })
+  expect((await ui.find({ text: /Fix the crash in the parser/ }))?.text).toContain('add a test')
+
+  await ui.press({ key: 'send' })
+  expect(sent).toEqual(['Fix the crash in the parser and add a test.'])
+  expect(await ui.find({ key: 'draft' })).toBeDefined()
   await ui.unmount()
 })

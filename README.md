@@ -11,6 +11,9 @@ for you: the improved text goes back into the box to review, edit or send.
 - **↩ Undo** (hotkey `u`) puts your original draft back. **✨ Improve again** runs it once more.
 - `/improve <text>` does the same from a slash command.
 - If you keep typing while it works, your draft is left untouched.
+- **In the Claude desktop app**, a mod can't read or fill the app's prompt box, so the band above it has its own
+  text box: type a rough prompt there and press Enter. The improved prompt appears in the band with **Send it**,
+  **Copy** and **Start over**.
 
 The rewrite keeps your intent and scope (it never adds goals or does the task), fixes typos and vague words
 ("it", "that thing") into the actual file, error or feature, opens with a one-line goal, and adds context, the
