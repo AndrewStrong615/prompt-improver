@@ -65,21 +65,27 @@ test('on desktop the band takes the draft itself, shows the rewrite and sends it
   })
 
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
-  expect(await ui.find({ key: 'draft' })).toBeDefined()
+  // Idle is one button; it opens the card with the field, and Cancel closes it.
+  expect(await ui.find({ key: 'draft' })).toBeUndefined()
+  await ui.press({ key: 'compose' })
+  await ui.press({ key: 'cancel-compose' })
+  expect(await ui.find({ key: 'draft' })).toBeUndefined()
 
+  await ui.press({ key: 'compose' })
   await ui.input({ key: 'draft', text: '  fix the bug in it ' })
   expect((await ui.find({ text: /Fix the crash in the parser/ }))?.text).toContain('add a test')
 
   await ui.press({ key: 'send' })
   expect(sent).toEqual(['Fix the crash in the parser and add a test.'])
-  expect(await ui.find({ key: 'draft' })).toBeDefined()
+  expect(await ui.find({ key: 'compose' })).toBeDefined()
 
   // Edit before sending: the rewrite goes into a field, Enter sends what was typed there.
+  await ui.press({ key: 'compose' })
   await ui.input({ key: 'draft', text: 'fix the bug in it' })
   await ui.press({ key: 'edit' })
   expect((await ui.find({ key: 'edit' }))?.props.value).toBe('Fix the crash in the parser and add a test.')
   await ui.input({ key: 'edit', text: 'Fix the crash in the parser, add a test, and keep the API.' })
   expect(sent.at(-1)).toBe('Fix the crash in the parser, add a test, and keep the API.')
-  expect(await ui.find({ key: 'draft' })).toBeDefined()
+  expect(await ui.find({ key: 'compose' })).toBeDefined()
   await ui.unmount()
 })

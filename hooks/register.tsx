@@ -10,6 +10,7 @@ const note = atom({ plugin: 'prompt-improver', key: 'note' } as const, null as s
 // Desktop only: the improved prompt, shown in the band (the app's prompt box is out of a mod's reach).
 const result = atom({ plugin: 'prompt-improver', key: 'result' } as const, null as string | null)
 const editing = atom({ plugin: 'prompt-improver', key: 'editing' } as const, null as string | null)
+const composing = atom({ plugin: 'prompt-improver', key: 'composing' } as const, false)
 
 // Used when there is no conversation to fork yet (before the first turn ends).
 const FALLBACK_MODEL = 'sonnet'
@@ -201,85 +202,113 @@ export const register: Register = on => {
           $.prompt.submit({ text }).catch(() => $.ui.toast('Could not send; copy it instead.'))
         }
 
-        // Idle: one slim line, no card.
-        if (state !== 'working' && better === null && edit === null) {
+        // Shared design with complex-mode: idle is one quiet line with no card; otherwise one flat card (title
+        // row with status right, body, all actions right-aligned). This card waits on the person, so its border
+        // is orange; complex-mode's lasting-state card keeps a neutral one.
+        const header = (title: string, status?: string) => (
+          <Box flexDirection="row" alignItems="center" justifyContent="space-between" gap={2}>
+            <Text weight="semibold">✨ {title}</Text>
+            {status !== undefined && (
+              <Text size="footnote" weight="medium" color="claude">
+                {status}
+              </Text>
+            )}
+          </Box>
+        )
+
+        const isComposing = await read($, composing)
+
+        // Idle: one quiet line with one button, matching complex-mode's row. (The desktop app draws a field
+        // shorter than a button and adds its own tag, so the field lives in the card that this button opens.)
+        if (state !== 'working' && better === null && edit === null && !isComposing) {
           return (
-            <Box flexDirection="column">
-              <Input
-                key="draft"
-                label="✨"
-                placeholder="Rough prompt here, press Enter to improve it"
-                submitLabel="improve"
-                onSubmit={value => void runDesktop($, value)}
-              />
+            <Box flexDirection="column" gap={1} paddingX={2}>
+              <Box flexDirection="row" alignItems="center" justifyContent="space-between" gap={2}>
+                <Text size="footnote" color="subtle">
+                  ✨ Prompt improver
+                </Text>
+                <Button key="compose" label="Improve…" onPress={() => update($, composing, () => true)} />
+              </Box>
               {message !== null && (
-                <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1}>
-                  <Text size="footnote" color="error">
+                <Box flexDirection="row" alignItems="center" justifyContent="space-between" gap={2}>
+                  <Text size="footnote" color="error" wrap="truncate-end">
                     {message}
                   </Text>
-                  <Button key="dismiss" label="Dismiss" onPress={() => update($, note, () => null)} />
+                  <Button key="dismiss" plain dimColor label="Dismiss" onPress={() => update($, note, () => null)} />
                 </Box>
               )}
             </Box>
           )
         }
 
-        // Editing the improved prompt before sending it.
+        // Each line is a direct child of the card, so the card's gap spaces them all evenly (a fragment
+        // would count as one child and squeeze its lines together).
+        if (state === 'working') {
+          return (
+            <Box borderStyle="round" borderColor="claude" paddingX={2} flexDirection="column" gap={1}>
+              {header('Prompt improver', 'Improving…')}
+              <Text size="footnote" color="subtle">
+                Rewriting your draft into a clear, specific prompt.
+              </Text>
+            </Box>
+          )
+        }
+
+        // Writing the rough prompt to improve. (The app adds its own "improve" tag beside the field.)
+        if (isComposing && better === null && edit === null) {
+          return (
+            <Box borderStyle="round" borderColor="claude" paddingX={2} flexDirection="column" gap={1}>
+              {header('Improve a prompt')}
+              <Input
+                key="draft"
+                rows={3}
+                autoFocus
+                placeholder="Type your rough prompt here"
+                submitLabel="improve"
+                onSubmit={async value => {
+                  if (value.trim().length > 0) await update($, composing, () => false)
+                  await runDesktop($, value)
+                }}
+              />
+              <Box flexDirection="row" alignItems="center" justifyContent="flex-end" gap={1}>
+                <Button key="cancel-compose" label="Cancel" onPress={() => update($, composing, () => false)} />
+              </Box>
+            </Box>
+          )
+        }
+
+        // Editing the improved prompt before sending it. (The app adds its own "send" tag beside the field.)
         if (edit !== null) {
           return (
-            <Box borderStyle="round" borderColor="claude" paddingX={1} flexDirection="column" gap={1}>
-              <Text weight="semibold">✨ Edit, then press Enter to send</Text>
+            <Box borderStyle="round" borderColor="claude" paddingX={2} flexDirection="column" gap={1}>
+              {header('Edit prompt')}
               <Input key="edit" value={edit} rows={4} submitLabel="send" onSubmit={value => void send(value)} />
-              <Box flexDirection="row" justifyContent="flex-end" gap={1}>
+              <Box flexDirection="row" alignItems="center" justifyContent="flex-end" gap={1}>
                 <Button key="cancel-edit" label="Cancel" onPress={() => update($, editing, () => null)} />
               </Box>
             </Box>
           )
         }
 
-        return (
-          <Box
-            borderStyle="round"
-            borderColor="claude"
-            paddingX={1}
-            flexDirection="column"
-            gap={1}
-          >
-            <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={2}>
-              <Text weight="semibold">
-                ✨ {better !== null ? 'Improved prompt' : 'Prompt improver'}
-              </Text>
-              {state === 'working' && (
-                <Text size="footnote" color="claude">
-                  Improving…
-                </Text>
-              )}
-            </Box>
+        const text = better ?? ''
 
-            {state === 'working' ? (
-              <Text size="footnote" color="subtle">
-                Rewriting your draft into a clear, specific prompt.
-              </Text>
-            ) : better !== null ? (
-              <>
-                <Box borderStyle="round" borderColor="subtle" paddingX={1}>
-                  <Text>{better}</Text>
-                </Box>
-                <Box flexDirection="row" justifyContent="flex-end" gap={1}>
-                  <Button key="clear" label="Start over" onPress={() => update($, result, () => null)} />
-                  <Button
-                    key="copy"
-                    label="Copy"
-                    onPress={async () => {
-                      const copied = await $.ui.copy({ text: better, surface: e.surface })
-                      $.ui.toast(copied.isCopied ? 'Copied. Paste it into the prompt box.' : 'Could not copy; select the text instead.')
-                    }}
-                  />
-                  <Button key="edit" label="Edit" onPress={() => update($, editing, () => better)} />
-                  <Button key="send" variant="primary" label="Send it" onPress={() => send(better)} />
-                </Box>
-              </>
-            ) : null}
+        return (
+          <Box borderStyle="round" borderColor="claude" paddingX={2} flexDirection="column" gap={1}>
+            {header('Improved prompt')}
+            <Text>{text}</Text>
+            <Box flexDirection="row" alignItems="center" justifyContent="flex-end" gap={1}>
+              <Button key="clear" plain dimColor label="Start over" onPress={() => update($, result, () => null)} />
+              <Button
+                key="copy"
+                label="Copy"
+                onPress={async () => {
+                  const copied = await $.ui.copy({ text, surface: e.surface })
+                  $.ui.toast(copied.isCopied ? 'Copied. Paste it into the prompt box.' : 'Could not copy; select the text instead.')
+                }}
+              />
+              <Button key="edit" label="Edit" onPress={() => update($, editing, () => text)} />
+              <Button key="send" variant="primary" label="Send it" onPress={() => send(text)} />
+            </Box>
           </Box>
         )
       }

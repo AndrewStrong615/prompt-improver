@@ -10,6 +10,8 @@ declare module 'claude-code' {
       result: string | null
       /** Desktop: the improved prompt being edited in the band before it is sent. */
       editing: string | null
+      /** Desktop: the card with the field for a rough prompt is open. */
+      composing: boolean
     }
   }
 }
