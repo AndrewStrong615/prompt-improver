@@ -50,6 +50,7 @@ test('on desktop the band takes the draft itself, shows the rewrite and sends it
 
   on('model.fork', (_, e) => {
     expect(e.prompt).toContain('<draft>\nfix the bug in it\n</draft>')
+    expect(e.effort).toBe('low')
     return {
       value: {
         isAnswered: true,
@@ -71,6 +72,14 @@ test('on desktop the band takes the draft itself, shows the rewrite and sends it
 
   await ui.press({ key: 'send' })
   expect(sent).toEqual(['Fix the crash in the parser and add a test.'])
+  expect(await ui.find({ key: 'draft' })).toBeDefined()
+
+  // Edit before sending: the rewrite goes into a field, Enter sends what was typed there.
+  await ui.input({ key: 'draft', text: 'fix the bug in it' })
+  await ui.press({ key: 'edit' })
+  expect((await ui.find({ key: 'edit' }))?.props.value).toBe('Fix the crash in the parser and add a test.')
+  await ui.input({ key: 'edit', text: 'Fix the crash in the parser, add a test, and keep the API.' })
+  expect(sent.at(-1)).toBe('Fix the crash in the parser, add a test, and keep the API.')
   expect(await ui.find({ key: 'draft' })).toBeDefined()
   await ui.unmount()
 })

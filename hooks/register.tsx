@@ -9,9 +9,12 @@ const original = atom({ plugin: 'prompt-improver', key: 'original' } as const, n
 const note = atom({ plugin: 'prompt-improver', key: 'note' } as const, null as string | null)
 // Desktop only: the improved prompt, shown in the band (the app's prompt box is out of a mod's reach).
 const result = atom({ plugin: 'prompt-improver', key: 'result' } as const, null as string | null)
+const editing = atom({ plugin: 'prompt-improver', key: 'editing' } as const, null as string | null)
 
 // Used when there is no conversation to fork yet (before the first turn ends).
-const FALLBACK_MODEL = 'opus'
+const FALLBACK_MODEL = 'sonnet'
+// A rewrite needs little thinking: low effort keeps it fast and cheap.
+const EFFORT = 'low' as const
 
 const RULES = `You are an expert prompt engineer. Rewrite the DRAFT below into the prompt the person
 should actually send to an AI coding agent (Claude Code) working in their repository.
@@ -51,7 +54,7 @@ function extract(reply: string): string | null {
 
 async function improve($: EngineInterface, draft: string): Promise<string | null> {
   // First choice: a fork of this session, so the rewrite knows what you're working on.
-  const forked = await $.model.fork({ prompt: ask(draft, true) })
+  const forked = await $.model.fork({ prompt: ask(draft, true), effort: EFFORT })
   if (forked.isAnswered) return extract(forked.text)
   if (forked.reason !== 'nothing-to-fork') throw new Error(forked.reason)
 
@@ -59,7 +62,7 @@ async function improve($: EngineInterface, draft: string): Promise<string | null
     model: FALLBACK_MODEL,
     prompt: ask(draft, false),
     maxTokens: 4000,
-    effort: 'medium',
+    effort: EFFORT,
   })
   if (done.isAnswered) return extract(done.text)
   throw new Error(done.reason)
@@ -187,12 +190,57 @@ export const register: Register = on => {
       if (e.surface === 'desktop') {
         const { Box, Button, Input, Text } = $.ui.resolve(e)
         const better = await read($, result)
-        const isActive = state === 'working' || better !== null
+        const edit = await read($, editing)
+        const send = async (text: string) => {
+          if (text.trim().length === 0) {
+            $.ui.toast('Nothing to send.')
+            return
+          }
+          await update($, result, () => null)
+          await update($, editing, () => null)
+          $.prompt.submit({ text }).catch(() => $.ui.toast('Could not send; copy it instead.'))
+        }
+
+        // Idle: one slim line, no card.
+        if (state !== 'working' && better === null && edit === null) {
+          return (
+            <Box flexDirection="column">
+              <Input
+                key="draft"
+                label="✨"
+                placeholder="Rough prompt here, press Enter to improve it"
+                submitLabel="improve"
+                onSubmit={value => void runDesktop($, value)}
+              />
+              {message !== null && (
+                <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1}>
+                  <Text size="footnote" color="error">
+                    {message}
+                  </Text>
+                  <Button key="dismiss" label="Dismiss" onPress={() => update($, note, () => null)} />
+                </Box>
+              )}
+            </Box>
+          )
+        }
+
+        // Editing the improved prompt before sending it.
+        if (edit !== null) {
+          return (
+            <Box borderStyle="round" borderColor="claude" paddingX={1} flexDirection="column" gap={1}>
+              <Text weight="semibold">✨ Edit, then press Enter to send</Text>
+              <Input key="edit" value={edit} rows={4} submitLabel="send" onSubmit={value => void send(value)} />
+              <Box flexDirection="row" justifyContent="flex-end" gap={1}>
+                <Button key="cancel-edit" label="Cancel" onPress={() => update($, editing, () => null)} />
+              </Box>
+            </Box>
+          )
+        }
 
         return (
           <Box
             borderStyle="round"
-            borderColor={isActive ? 'claude' : 'subtle'}
+            borderColor="claude"
             paddingX={1}
             flexDirection="column"
             gap={1}
@@ -227,36 +275,11 @@ export const register: Register = on => {
                       $.ui.toast(copied.isCopied ? 'Copied. Paste it into the prompt box.' : 'Could not copy; select the text instead.')
                     }}
                   />
-                  <Button
-                    key="send"
-                    variant="primary"
-                    label="Send it"
-                    onPress={async () => {
-                      await update($, result, () => null)
-                      $.prompt.submit({ text: better }).catch(() => $.ui.toast('Could not send; copy it instead.'))
-                    }}
-                  />
+                  <Button key="edit" label="Edit" onPress={() => update($, editing, () => better)} />
+                  <Button key="send" variant="primary" label="Send it" onPress={() => send(better)} />
                 </Box>
               </>
-            ) : (
-              <>
-                <Input
-                  key="draft"
-                  placeholder="Type a rough prompt, then press Enter to improve it"
-                  submitLabel="improve"
-                  rows={2}
-                  onSubmit={value => void runDesktop($, value)}
-                />
-                {message !== null && (
-                  <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1}>
-                    <Text size="footnote" color="error">
-                      {message}
-                    </Text>
-                    <Button key="dismiss" label="Dismiss" onPress={() => update($, note, () => null)} />
-                  </Box>
-                )}
-              </>
-            )}
+            ) : null}
           </Box>
         )
       }
